@@ -2877,12 +2877,7 @@ static int annotation_set_mailboxopt(annotate_state_t *state,
         newopts &= ~flag;
     }
 
-    /* only mark dirty if there's been a change */
-    if (mailbox->i.options != newopts) {
-        mailbox_index_dirty(mailbox);
-        mailbox->i.options = newopts;
-        mboxlist_foldermodseq_dirty(mailbox);
-    }
+    mailbox_set_options(mailbox, newopts);
 
     return 0;
 }
@@ -2906,10 +2901,7 @@ static int annotation_set_pop3showafter(annotate_state_t *state,
             return IMAP_PROTOCOL_BAD_PARAMETERS;
     }
 
-    if (date != mailbox->i.pop3_show_after) {
-        mailbox->i.pop3_show_after = date;
-        mailbox_index_dirty(mailbox);
-    }
+    mailbox_set_pop3_show_after(date);
 
     return 0;
 }

@@ -1497,7 +1497,7 @@ EXPORTED int mboxlist_deletemailbox(const char *name, int isadmin,
         if (mailbox) {
             newmbentry->uniqueid = xstrdupnull(mailbox->uniqueid);
             newmbentry->uidvalidity = mailbox->i.uidvalidity;
-            newmbentry->foldermodseq = mailbox_modseq_dirty(mailbox);
+            newmbentry->foldermodseq = mailbox_modseq_dirty(mailbox, NULL, NULL, 0);
         }
         r = mboxlist_update(newmbentry, /*localonly*/1);
         mboxlist_entry_free(&newmbentry);
@@ -1731,7 +1731,7 @@ EXPORTED int mboxlist_renamemailbox(const char *oldname, const char *newname,
             oldmbentry->mbtype = MBTYPE_DELETED;
             oldmbentry->uidvalidity = oldmailbox->i.uidvalidity;
             oldmbentry->uniqueid = xstrdupnull(oldmailbox->uniqueid);
-            oldmbentry->foldermodseq = mailbox_modseq_dirty(oldmailbox);
+            oldmbentry->foldermodseq = mailbox_modseq_dirty(oldmailbox, NULL, NULL, 0);
 
             r = mboxlist_update_entry(oldname, oldmbentry, &tid);
 
@@ -3140,21 +3140,20 @@ EXPORTED int mboxlist_unsetquota(const char *root)
     return r;
 }
 
-EXPORTED modseq_t mboxlist_foldermodseq_dirty(struct mailbox *mailbox)
+EXPORTED int mboxlist_setfoldermodseq(struct mailbox *mailbox, modseq_t modseq)
 {
     mbentry_t *mbentry = NULL;
-    modseq_t ret = 0;
 
-    if (mboxlist_mylookup(mailbox->name, &mbentry, NULL, 0))
-        return 0;
+    int r = mboxlist_mylookup(mailbox->name, &mbentry, NULL, 0);
+    if (r) return r;
 
-    ret = mbentry->foldermodseq = mailbox_modseq_dirty(mailbox);
+    mbentry->foldermodseq = modseq;
 
     mboxlist_update(mbentry, 0);
 
     mboxlist_entry_free(&mbentry);
 
-    return ret;
+    return 0;
 }
 
 /*

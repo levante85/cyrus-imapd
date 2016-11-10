@@ -2353,7 +2353,6 @@ static int mailbox_compare_update(struct mailbox *mailbox,
                 goto out;
             }
 
-            copy.silent = 1;
             r = mailbox_rewrite_index_record(mailbox, &copy);
             if (r) {
                 syslog(LOG_ERR, "IOERROR: failed to rewrite record %s %u",
@@ -2376,7 +2375,6 @@ static int mailbox_compare_update(struct mailbox *mailbox,
             /* skip out on the first pass */
             if (!doupdate) continue;
 
-            mrecord.silent = 1;
             r = sync_append_copyfile(mailbox, &mrecord, mannots, part_list);
             if (r) {
                 syslog(LOG_ERR, "IOERROR: failed to append file %s %d",
@@ -2615,6 +2613,9 @@ int sync_apply_mailbox(struct dlist *kin,
 
     /* now we're committed to writing something no matter what happens! */
 
+    mailbox_index_dirty(mailbox);
+    mailbox->silentchanges = 1;
+
     /* always take the ACL from the master, it's not versioned */
     if (strcmp(mailbox->acl, acl)) {
         mailbox_set_acl(mailbox, acl, 0);
@@ -2636,19 +2637,13 @@ int sync_apply_mailbox(struct dlist *kin,
         goto done;
     }
 
-    r = mailbox_compare_update(mailbox, kr, 1, part_list);
-    if (r) {
-        abort();
-        return r;
-    }
-
-    mailbox_index_dirty(mailbox);
     if (!opt_force) {
         assert(mailbox->i.last_uid <= last_uid);
     }
     mailbox->i.last_uid = last_uid;
     mailbox->i.recentuid = recentuid;
     mailbox->i.recenttime = recenttime;
+    mailbox->i.highestmodseq = highestmodseq;
     mailbox->i.last_appenddate = last_appenddate;
     mailbox->i.pop3_last_login = pop3_last_login;
     mailbox->i.pop3_show_after = pop3_show_after;
@@ -2656,17 +2651,18 @@ int sync_apply_mailbox(struct dlist *kin,
     mailbox->i.options = (options & MAILBOX_OPTIONS_MASK) |
                          (mailbox->i.options & ~MAILBOX_OPTIONS_MASK);
 
-    /* this happens all the time! */
-    if (mailbox->i.highestmodseq != highestmodseq) {
-        mailbox->i.highestmodseq = mboxname_setmodseq(mailbox->name, highestmodseq, mailbox->mbtype, /*dofolder*/0);
-    }
-
     /* this happens rarely, so let us know */
     if (mailbox->i.uidvalidity != uidvalidity) {
         syslog(LOG_NOTICE, "%s uidvalidity changed, updating %u => %u",
                mailbox->name, mailbox->i.uidvalidity, uidvalidity);
         /* make sure nothing new gets created with a lower value */
         mailbox->i.uidvalidity = mboxname_setuidvalidity(mailbox->name, uidvalidity);
+    }
+
+    r = mailbox_compare_update(mailbox, kr, 1, part_list);
+    if (r) {
+        abort();
+        return r;
     }
 
     if (mailbox_has_conversations(mailbox)) {

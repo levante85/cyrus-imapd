@@ -1054,7 +1054,9 @@ EXPORTED void mailbox_index_dirty(struct mailbox *mailbox)
     mailbox->i.dirty = 1;
 }
 
-EXPORTED modseq_t mailbox_modseq_dirty(struct mailbox *mailbox)
+EXPORTED modseq_t mailbox_modseq_dirty(struct mailbox *mailbox,
+                                       const struct index_record *oldrecord,
+                                       struct index_record *newrecord)
 {
     assert(mailbox_index_islocked(mailbox, 1));
 
@@ -1313,8 +1315,7 @@ done:
 }
 
 /* set a new ACL - only dirty if changed */
-EXPORTED int mailbox_set_acl(struct mailbox *mailbox, const char *acl,
-                    int dirty_modseq)
+EXPORTED int mailbox_set_acl(struct mailbox *mailbox, const char *acl)
 {
     if (mailbox->acl) {
         if (!strcmp(mailbox->acl, acl))
@@ -1323,8 +1324,7 @@ EXPORTED int mailbox_set_acl(struct mailbox *mailbox, const char *acl,
     }
     mailbox->acl = xstrdup(acl);
     mailbox->header_dirty = 1;
-    if (dirty_modseq)
-        mailbox_modseq_dirty(mailbox);
+    mboxlist_setfoldermodseq(mailbox, mailbox_modseq_dirty(mailbox, NULL, NULL, 1));
     return 0;
 }
 
@@ -1347,6 +1347,7 @@ EXPORTED int mailbox_set_quotaroot(struct mailbox *mailbox, const char *quotaroo
 
     /* either way, it's changed, so dirty */
     mailbox->header_dirty = 1;
+    mboxlist_setfoldermodseq(mailbox, mailbox_modseq_dirty(mailbox, NULL, NULL, 1));
 
     return 0;
 }
@@ -2749,7 +2750,7 @@ EXPORTED void mailbox_annot_changed(struct mailbox *mailbox,
     /* we are dirtying both index and quota */
     mailbox_index_dirty(mailbox);
     mailbox_quota_dirty(mailbox);
-    mboxlist_foldermodseq_dirty(mailbox);
+    mailbox_modseq_dirty(mailbox, NULL, NULL, 1);
 
     /* corruption prevention - check we don't go negative */
     if (mailbox->i.quota_annot_used > (quota_t)oldval->len)
@@ -3434,14 +3435,7 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
      * being silent about it (i.e. marking an already EXPUNGED
      * message as UNLINKED, or just updating the content_lines
      * field or cache_offset) */
-    if (record->silent) {
-        mailbox_index_dirty(mailbox);
-    }
-    else {
-        mailbox_modseq_dirty(mailbox);
-        record->modseq = mailbox->i.highestmodseq;
-        record->last_updated = mailbox->last_updated;
-    }
+    mailbox_modseq_dirty(mailbox, &oldrecord, record);
 
     if (record->system_flags & FLAG_UNLINKED) {
         /* mark required actions */
@@ -3530,15 +3524,7 @@ EXPORTED int mailbox_append_index_record(struct mailbox *mailbox,
         record->sentdate = mktime(tm);
     }
 
-    /* update the highestmodseq if needed */
-    if (record->silent) {
-        mailbox_index_dirty(mailbox);
-    }
-    else {
-        mailbox_modseq_dirty(mailbox);
-        record->modseq = mailbox->i.highestmodseq;
-        record->last_updated = mailbox->last_updated;
-    }
+    mailbox_modseq_dirty(mailbox, NULL, record);
 
     int object_storage_enabled = 0 ;
 #if defined ENABLE_OBJECTSTORE
@@ -3660,6 +3646,8 @@ static int mailbox_index_unlink(struct mailbox *mailbox)
      * 2) file has been archived/unarchived, and the other one needs
      *    to be removed.
      */
+    mailbox->silentchanges = 1;
+
     const struct index_record *record;
     struct mailbox_iter *iter = mailbox_iter_init(mailbox, 0, 0);
     while ((record = mailbox_iter_step(iter))) {
@@ -3669,7 +3657,6 @@ static int mailbox_index_unlink(struct mailbox *mailbox)
             struct index_record copyrecord = *record;
             mailbox_record_cleanup(mailbox, &copyrecord);
             copyrecord.system_flags &= ~FLAG_NEEDS_CLEANUP;
-            copyrecord.silent = 1;
             /* XXX - error handling */
             mailbox_rewrite_index_record(mailbox, &copyrecord);
         }
@@ -4156,6 +4143,8 @@ EXPORTED void mailbox_archive(struct mailbox *mailbox,
     assert(mailbox_index_islocked(mailbox, 1));
     if (!decideproc) decideproc = &mailbox_should_archive;
 
+    mailbox->silentchanges = 1;
+
     struct mailbox_iter *iter = mailbox_iter_init(mailbox, 0, flags);
 
     while ((record = mailbox_iter_step(iter))) {
@@ -4248,7 +4237,6 @@ EXPORTED void mailbox_archive(struct mailbox *mailbox,
         }
 
         /* rewrite the index record */
-        copyrecord.silent = 1;
         if (mailbox_rewrite_index_record(mailbox, &copyrecord))
             continue;
         mailbox->i.options |= OPT_MAILBOX_NEEDS_UNLINK;
@@ -4368,6 +4356,8 @@ EXPORTED int mailbox_expunge_cleanup(struct mailbox *mailbox, time_t expunge_mar
     time_t first_expunged = 0;
     int r = 0;
 
+    mailbox->silentchanges = 1;
+
     /* run the actual expunge phase */
     struct mailbox_iter *iter = mailbox_iter_init(mailbox, 0, 0);
     while ((record = mailbox_iter_step(iter))) {
@@ -4395,7 +4385,6 @@ EXPORTED int mailbox_expunge_cleanup(struct mailbox *mailbox, time_t expunge_mar
 
         struct index_record copyrecord = *record;
         copyrecord.system_flags |= FLAG_UNLINKED;
-        copyrecord.silent = 1;
         if (mailbox_rewrite_index_record(mailbox, &copyrecord)) {
             syslog(LOG_ERR, "IOERROR: failed to mark unlinked %s %u (recno %d)",
                    mailbox->name, copyrecord.uid, copyrecord.recno);

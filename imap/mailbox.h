@@ -157,7 +157,6 @@ struct index_record {
 
     /* metadata */
     uint32_t recno;
-    int silent;
     struct cacherecord crec;
 };
 
@@ -263,6 +262,7 @@ struct mailbox {
 #endif
 
     /* change management */
+    int silentchanges;
     int modseq_dirty;
     int header_dirty;
     int quota_dirty;
@@ -523,7 +523,9 @@ struct webdav_db *mailbox_open_webdav(struct mailbox *mailbox);
 extern int mailbox_refresh_index_header(struct mailbox *mailbox);
 extern int mailbox_write_header(struct mailbox *mailbox, int force);
 extern void mailbox_index_dirty(struct mailbox *mailbox);
-extern modseq_t mailbox_modseq_dirty(struct mailbox *mailbox);
+extern modseq_t mailbox_modseq_dirty(struct mailbox *mailbox,
+                                     const struct index_record *oldrecord,
+                                     struct index_record *newrecord);
 extern int mailbox_reload_index_record(struct mailbox *mailbox,
                                      struct index_record *record);
 extern int mailbox_rewrite_index_record(struct mailbox *mailbox,
@@ -533,8 +535,7 @@ extern int mailbox_append_index_record(struct mailbox *mailbox,
 extern int mailbox_find_index_record(struct mailbox *mailbox, uint32_t uid,
                                      struct index_record *record);
 
-extern int mailbox_set_acl(struct mailbox *mailbox, const char *acl,
-                           int dirty_modseq);
+extern int mailbox_set_acl(struct mailbox *mailbox, const char *acl);
 extern int mailbox_set_quotaroot(struct mailbox *mailbox, const char *quotaroot);
 extern int mailbox_user_flag(struct mailbox *mailbox, const char *flag,
                              int *flagnum, int create);
